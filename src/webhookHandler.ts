@@ -1,6 +1,6 @@
 import { shopifyClient } from './utils/shopifyClient';
-import { sendPriceAlert } from './utils/emailService';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 interface ProductWebhookPayload {
   id: number;
@@ -10,6 +10,13 @@ interface ProductWebhookPayload {
     price: string;
   }>;
   admin_graphql_api_id: string;
+}
+
+interface PriceAlertData {
+  title: string;
+  oldPrice: number;
+  newPrice: number;
+  decreasePercentage: number;
 }
 
 // Query to get previous product data
@@ -86,7 +93,7 @@ export async function handleProductUpdate(
           title: payload.title,
           oldPrice,
           newPrice,
-          percentDecrease: priceDecrease,
+          decreasePercentage: priceDecrease,
         });
       }
     }
@@ -95,3 +102,55 @@ export async function handleProductUpdate(
     throw error;
   }
 }
+
+async function sendPriceAlert(data: PriceAlertData) {
+  const { title, oldPrice, newPrice, decreasePercentage } = data;
+
+  // Verify email configuration
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.error('Email configuration missing');
+    throw new Error('Email configuration missing');
+  }
+
+  const emailContent = {
+    from: process.env.EMAIL_USER,  // Your Gmail address
+    to: process.env.EMAIL_TO || process.env.EMAIL_USER, // Where to send alerts
+    subject: `Price Alert: ${title}`,
+    html: `
+      <h2>Price Decrease Alert</h2>
+      <p><strong>Product:</strong> ${title}</p>
+      <p><strong>Old Price:</strong> $${oldPrice.toFixed(2)}</p>
+      <p><strong>New Price:</strong> $${newPrice.toFixed(2)}</p>
+      <p><strong>Decrease:</strong> ${decreasePercentage.toFixed(2)}%</p>
+    `,
+  };
+
+  console.log('Attempting to send email alert to:', emailContent.to);
+  
+  try {
+    await transporter.sendMail(emailContent);
+    console.log('Email alert sent successfully');
+  } catch (error) {
+    console.error('Failed to send email:', error);
+    throw error;
+  }
+}
+
+// Update the transporter configuration
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS, // Use the App Password here
+  },
+  debug: true, // Enable debug logs
+});
+
+// Verify the transporter works
+transporter.verify(function (error, success) {
+  if (error) {
+    console.error('Email transporter verification failed:', error);
+  } else {
+    console.log('Email transporter is ready to send messages');
+  }
+});
